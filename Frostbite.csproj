@@ -1,0 +1,45 @@
+﻿<Project Sdk="Microsoft.NET.Sdk.WindowsDesktop">
+
+  <PropertyGroup>
+    <OutputType>Exe</OutputType>
+    <TargetFramework>net8.0-windows10.0.19041.0</TargetFramework>
+    <UseWPF>true</UseWPF>
+    <UseWindowsForms>true</UseWindowsForms>
+    <PublishSingleFile>true</PublishSingleFile>
+    <RuntimeIdentifier>win-x64</RuntimeIdentifier>
+    <Configurations>Debug;Release;x64</Configurations>
+    <Platforms>AnyCPU;x64</Platforms>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <Compile Remove="Program_Rii_i4_Version.cs" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <None Remove="Wintermelon_demo.jpg" />
+  </ItemGroup>
+
+  <!-- Removed stray placeholder reference to YourProject.csproj that caused Solution Explorer errors.
+       If you intended to include another project file, replace this with the correct path. -->
+  <!--<ItemGroup>
+    <None Include="YourProject.csproj" />
+  </ItemGroup>-->
+
+  <!-- Create a default config.json at build time. The output directory is configurable:
+       - By default the file is written into the build output directory ($(TargetDir)),
+         so it will be present when you copy the build artifacts to C:\Frostbite.
+       - Override with: /p:DefaultConfigDir="C:\Frostbite" -->
+  <Target Name="CreateDefaultConfigJson" AfterTargets="Build">
+    <PropertyGroup>
+      <DefaultConfigDir Condition="'$(DefaultConfigDir)'==''">$(TargetDir)</DefaultConfigDir>
+      <DefaultConfigFile>$([System.IO.Path]::Combine('$(DefaultConfigDir)','config.json'))</DefaultConfigFile>
+    </PropertyGroup>
+
+    <!-- create directory only if missing -->
+    <MakeDir Directories="$(DefaultConfigDir)" Condition="!Exists('$(DefaultConfigDir)')" />
+
+    <!-- create config.json with default content; do not overwrite an existing file -->
+    <WriteLinesToFile File="$(DefaultConfigFile)" Overwrite="true" Encoding="UTF-8" Lines="{ %22KeyboardNames%22: [ %22i4%22, %22changeMe%22 ] }" />
+  </Target>
+
+</Project>
