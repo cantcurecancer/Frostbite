@@ -59,14 +59,3 @@ Usage notes & troubleshooting
 
 Attribution
 - This project was adapted from earlier work (originally named Wintermelon). See repository history for details.
-
-# Development notes
-
-# clone your newly renamed fork and copy files into it
-git clone git@github.com:YOUR_USER/Frostbite.git
-cd Frostbite
-# copy your project files into this folder (or move the working tree contents here)
-# then:
-git add .
-git commit -m "Initial Frostbite import — forked from Wintermelon; rename and installer updates"
-git push -u origin main
