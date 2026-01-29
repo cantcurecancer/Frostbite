@@ -12,7 +12,7 @@ Notes:   - Based on the original Wintermelon by arun-goud, heavily modified to r
          - Configurable keyboard/controller name tokens in config.json
          - I'll probably work on support for USB devices/controllers later
 License: GNU General Public License (GPL), Version 2
-Version : 0.1
+Version : 0.2.1
 */
 using System;
 using System.Collections.Generic;
@@ -30,8 +30,15 @@ namespace Frostbite
 {
     internal static class Program
     {
-        // Minimal config holder: list of Bluetooth keyboard/controller name tokens.
-        private sealed class UserConfig { public List<string> KeyboardNames { get; set; } = new(); }
+        // Config holder: list of Bluetooth keyboard/controller name tokens and behavior flags.
+        private sealed class UserConfig
+        {
+            public List<string> KeyboardNames { get; set; } = new();
+            public bool CloneOnLock { get; set; } = false;          // default: do NOT clone on lock
+            public bool CloneOnUnlockOnly { get; set; } = true;     // default: clone on unlock
+            public bool PowerSaveOnLock { get; set; } = false;      // optional: put monitors to power-save after cloning on lock
+            public int PowerSaveDelayMs { get; set; } = 500;        // delay before power-save signal
+        }
 
         // P/Invoke: set window placement and enumerate desktop windows.
         [DllImport("user32.dll")] private static extern bool SetWindowPlacement(IntPtr hWnd, [In] ref WINDOWPLACEMENT lpwndpl);
@@ -40,6 +47,60 @@ namespace Frostbite
         [DllImport("user32.dll")] public static extern bool EnumDesktopWindows(IntPtr hDesktop, EnumDelegate lpEnumCallbackFunction, IntPtr lParam);
         [DllImport("User32.dll")] public static extern uint GetWindowThreadProcessId(IntPtr hWnd, out uint lpdwProcessId);
         public delegate bool EnumDelegate(IntPtr hWnd, int lParam);
+
+        // WM_SYSCOMMAND / monitor power helpers
+        [DllImport("user32.dll", CharSet = CharSet.Auto)]
+        private static extern IntPtr SendMessage(IntPtr hWnd, uint Msg, IntPtr wParam, IntPtr lParam);
+        private const uint WM_SYSCOMMAND = 0x0112;
+        private const int SC_MONITORPOWER = 0xF170;
+        private static readonly IntPtr HWND_BROADCAST = new IntPtr(0xffff);
+
+        private static void SetMonitorsPower(int state)
+        {
+            // state: 1 = low power, 2 = shut off. Passing -1 or 0 often interpreted as "on".
+            try
+            {
+                SendMessage(HWND_BROADCAST, WM_SYSCOMMAND, new IntPtr(SC_MONITORPOWER), new IntPtr(state));
+                Log($"SetMonitorsPower({state}) called.");
+            }
+            catch (Exception ex) { Log($"SetMonitorsPower error: {ex.Message}"); }
+        }
+
+        // New helper: launch a detached, hidden PowerShell process to send the monitor power broadcast after a delay.
+        // This avoids keeping the main console process open and prevents a lingering black command window.
+        private static void LaunchDetachedMonitorPower(int delayMs, int state)
+        {
+            try
+            {
+                // Build a PowerShell command that sleeps then invokes SendMessage via Add-Type.
+                // Use -NoProfile and -WindowStyle Hidden; Start process CreateNoWindow = true.
+                var psCommand = $"Start-Sleep -Milliseconds {Math.Max(0, delayMs)}; " +
+                                "Add-Type -Namespace Win32 -Name NativeMethods -MemberDefinition @'\n" +
+                                "[System.Runtime.InteropServices.DllImport(\"user32.dll\")]\n" +
+                                "public static extern IntPtr SendMessage(IntPtr hWnd, uint Msg, IntPtr wParam, IntPtr lParam);\n" +
+                                "'@; " +
+                                $"[Win32.NativeMethods]::SendMessage([IntPtr]0xffff, 0x0112, [IntPtr]0xF170, [IntPtr]{state});";
+
+                var args = $"-NoProfile -WindowStyle Hidden -Command \"{psCommand.Replace("\"", "\\\"")}\"";
+
+                var psi = new ProcessStartInfo
+                {
+                    FileName = "powershell.exe",
+                    Arguments = args,
+                    CreateNoWindow = true,
+                    UseShellExecute = false,
+                    RedirectStandardOutput = false,
+                    RedirectStandardError = false
+                };
+
+                Process.Start(psi);
+                Log($"Launched detached power command (state={state}, delayMs={delayMs}).");
+            }
+            catch (Exception ex)
+            {
+                Log($"LaunchDetachedMonitorPower error: {ex.Message}");
+            }
+        }
 
         // Display topology via SetDisplayConfig.
         [DllImport("user32.dll", CharSet = CharSet.Unicode)]
@@ -92,23 +153,16 @@ namespace Frostbite
         // Entry point
         private static async Task Main(string[] args)
         {
-            // Resolve config location without hardcoding to LocalAppData.
-            // Prefer executable directory (so build artifacts copied to C:\Frostbite include config.json).
             var exeDir = Path.GetFullPath(AppContext.BaseDirectory.TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar));
             var localAppDir = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "Frostbite");
 
             var (config, configDir) = LoadUserConfig(new[] { exeDir, localAppDir });
 
-            // Use C:\Frostbite as the default location for winpos.json (requested).
             var settingsDir = @"C:\Frostbite";
             try { Directory.CreateDirectory(settingsDir); } catch { /* ignore */ }
             var settingsFile = Path.Combine(settingsDir, "winpos.json");
 
-            if (args.Length == 0)
-            {
-                //*Console.WriteLine("Usage: Frostbite [save | restore]");
-                return;
-            }
+            if (args.Length == 0) { return; }
 
             var handleInfo = new List<IntPtr>();
 
@@ -120,18 +174,12 @@ namespace Frostbite
                     var sb = new StringBuilder(255);
                     GetWindowText(hWnd, sb, sb.Capacity + 1);
                     var title = sb.ToString();
-                    if (!IsWindowVisible(hWnd) || string.IsNullOrEmpty(title))
-                    {
-                        return true;
-                    }
+                    if (!IsWindowVisible(hWnd) || string.IsNullOrEmpty(title)) { return true; }
 
                     GetWindowThreadProcessId(hWnd, out var pid);
                     using (var p = Process.GetProcessById((int)pid))
                     {
-                        if (p.MainModule?.FileName?.IndexOf("Frostbite", StringComparison.OrdinalIgnoreCase) >= 0)
-                        {
-                            return true;
-                        }
+                        if (p.MainModule?.FileName?.IndexOf("Frostbite", StringComparison.OrdinalIgnoreCase) >= 0) { return true; }
                     }
                     handleInfo.Add(hWnd);
                 }
@@ -148,28 +196,112 @@ namespace Frostbite
 
             if (string.Equals(args[0], "save", StringComparison.OrdinalIgnoreCase))
             {
-                //*Console.WriteLine("Saving window positions to {0}...", settingsFile);
-                // Preserve prior simple behavior: write an empty JSON array so file is valid JSON.
+                // Save positions (legacy wrote "[]"); keep same behavior.
                 try { File.WriteAllText(settingsFile, "[]"); } catch { /* ignore */ }
-                //*Console.WriteLine("Done.");
-                CloneDisplays();
+
+                // Only clone on lock if configured to do so.
+                if (config.CloneOnLock && !config.CloneOnUnlockOnly)
+                {
+                    try
+                    {
+                        CloneDisplays();
+                        Log("CloneDisplays invoked on lock (CloneOnLock=true).");
+                        if (config.PowerSaveOnLock)
+                        {
+                            // Fire-and-forget the power-save broadcast from a detached process so the console does not linger.
+                            LaunchDetachedMonitorPower(config.PowerSaveDelayMs, 2); // 2 = shut off
+                            Log("PowerSaveOnLock: scheduled detached power-save (2).");
+                        }
+                    }
+                    catch (Exception ex) { Log($"CloneOnLock error: {ex.Message}"); }
+                }
+
                 return;
             }
 
             if (string.Equals(args[0], "restore", StringComparison.OrdinalIgnoreCase))
             {
-                Log("--- RESTORE TRIGGERED (Optimized Polling) ---");
-                bool isDeviceConnected = false;
-                // Poll for devices up to 7.5s (500ms x 15)
-                for (int i = 0; i < 15; i++)
+                Log("--- RESTORE TRIGGERED ---");
+
+                // If configured to clone only on unlock, do it here so TV receives clone only when waking.
+                if (config.CloneOnUnlockOnly)
                 {
-                    if (await IsBluetoothPairedDeviceConnected(config.KeyboardNames))
+                    try
                     {
-                        Log($"Device match detected at {(i + 1) * 0.5} seconds.");
-                        isDeviceConnected = true;
-                        break;
+                        CloneDisplays();
+                        Log("CloneDisplays invoked on unlock (CloneOnUnlockOnly=true).");
+                        if (config.PowerSaveOnLock)
+                        {
+                            // Wake monitors using a detached process so restore doesn't block
+                            LaunchDetachedMonitorPower(config.PowerSaveDelayMs, -1); // -1 often interpreted as "on"
+                            Log("PowerSaveOnLock: scheduled detached wake attempt (-1).");
+                        }
                     }
-                    await Task.Delay(500);
+                    catch (Exception ex) { Log($"CloneOnUnlockOnly error: {ex.Message}"); }
+                }
+
+                bool isDeviceConnected = false;
+
+                // Simplified / consolidated device scanning:
+                // iterate "modes" for BLE and Classic in one combined loop to reduce duplicated code.
+                foreach (var isLe in new[] { true, false })
+                {
+                    try
+                    {
+                        var selector = isLe ? BluetoothLEDevice.GetDeviceSelectorFromPairingState(true)
+                                            : BluetoothDevice.GetDeviceSelectorFromPairingState(true);
+
+                        var devices = await DeviceInformation.FindAllAsync(selector);
+                        if (devices == null || devices.Count == 0) { continue; }
+
+                        foreach (var d in devices)
+                        {
+                            var name = d.Name ?? string.Empty;
+                            if (string.IsNullOrWhiteSpace(name)) { continue; }
+
+                            foreach (var t in config.KeyboardNames)
+                            {
+                                if (string.IsNullOrWhiteSpace(t)) { continue; }
+                                if (!name.Contains(t, StringComparison.OrdinalIgnoreCase)) { continue; }
+
+                                try
+                                {
+                                    if (isLe)
+                                    {
+                                        using var ble = await BluetoothLEDevice.FromIdAsync(d.Id);
+                                        if (ble != null)
+                                        {
+                                            var status = ble.ConnectionStatus;
+                                            Log($"MATCH (LE): Found device '{name}' matching token '{t}'. LIVE Connection Status: {status}");
+                                            if (status == BluetoothConnectionStatus.Connected) { isDeviceConnected = true; break; }
+                                        }
+                                    }
+                                    else
+                                    {
+                                        using var bt = await BluetoothDevice.FromIdAsync(d.Id);
+                                        if (bt != null)
+                                        {
+                                            var status = bt.ConnectionStatus;
+                                            Log($"MATCH (Classic): Found device '{name}' matching token '{t}'. LIVE Connection Status: {status}");
+                                            if (status == BluetoothConnectionStatus.Connected) { isDeviceConnected = true; break; }
+                                        }
+                                    }
+                                }
+                                catch (Exception ex)
+                                {
+                                    Log($"Device.FromIdAsync error for '{name}': {ex.Message}");
+                                }
+                            }
+
+                            if (isDeviceConnected) { break; }
+                        }
+
+                        if (isDeviceConnected) { break; }
+                    }
+                    catch (Exception ex)
+                    {
+                        Log($"{(isLe ? "BLE" : "Classic")} scan error: {ex.Message}");
+                    }
                 }
 
                 if (isDeviceConnected)
@@ -185,10 +317,8 @@ namespace Frostbite
 
                 await Task.Delay(2000); // allow topology to settle
 
-                //*Console.WriteLine("Restoring window positions from {0}...", settingsFile);
                 var processInfo = ReadSavedPlacementsJson(settingsFile);
 
-                //*Console.WriteLine("Restoring {0} windows", handleInfo.Count());
                 foreach (var h in handleInfo)
                 {
                     try
@@ -203,83 +333,106 @@ namespace Frostbite
                             if (processInfo.TryGetValue(key, out var wp))
                             {
                                 wp.length = Marshal.SizeOf<WINDOWPLACEMENT>();
-                                wp.showCmd = 1; // restored as normal
+                                wp.showCmd = 1;
                                 SetWindowPlacement(h, ref wp);
-                                //Console.WriteLine("Restored placement for {0}", key);
                             }
                         }
                     }
                     catch (System.ComponentModel.Win32Exception) { /* skip protected windows */ }
                     catch { /* ignore transient errors */ }
                 }
-                //*Console.WriteLine("Done.");
                 return;
             }
-            //*Console.WriteLine("Usage: Frostbite [save | restore]");
         }
 
-        // Load or create config.json. Checks multiple candidate directories (e.g. exe folder then LocalAppData).
-        // Returns both the parsed configuration and the directory where config.json was found/created.
+        // Load or create config.json.
         private static (UserConfig config, string configDir) LoadUserConfig(IEnumerable<string> candidateDirs)
         {
             var cfgFileName = "config.json";
-            var def = new UserConfig { KeyboardNames = new List<string> { "i4" } };
+            var def = new UserConfig
+            {
+                KeyboardNames = new List<string> { "i4" },
+                CloneOnLock = false,
+                CloneOnUnlockOnly = true,
+                PowerSaveOnLock = false,
+                PowerSaveDelayMs = 500
+            };
 
-            // First, look for an existing config.json in the candidate locations.
+            // 1) Look for existing config
             foreach (var dir in candidateDirs)
             {
                 try
                 {
                     var path = Path.Combine(dir, cfgFileName);
-                    if (File.Exists(path))
-                    {
-                        var parsed = TryReadConfigFile(path);
-                        if (parsed != null)
-                        {
-                            return (parsed, dir);
-                        }
-                    }
+                    if (!File.Exists(path)) { continue; }
+                    var parsed = TryReadConfigFile(path);
+                    if (parsed != null) { return (parsed, dir); }
                 }
-                catch { /* ignore and continue */ }
+                catch { /* continue */ }
             }
 
-            // Not found: try to create config.json in the first writable candidate directory.
+            // 2) Create default config in first writable candidate
             foreach (var dir in candidateDirs)
             {
                 try
                 {
                     Directory.CreateDirectory(dir);
                     var path = Path.Combine(dir, cfgFileName);
-                    var json = JsonSerializer.Serialize(new { KeyboardNames = def.KeyboardNames }, new JsonSerializerOptions { WriteIndented = true });
-                    File.WriteAllText(path, json);
+                    var jsonObj = new
+                    {
+                        KeyboardNames = def.KeyboardNames,
+                        CloneOnLock = def.CloneOnLock,
+                        CloneOnUnlockOnly = def.CloneOnUnlockOnly,
+                        PowerSaveOnLock = def.PowerSaveOnLock,
+                        PowerSaveDelayMs = def.PowerSaveDelayMs
+                    };
+                    File.WriteAllText(path, JsonSerializer.Serialize(jsonObj, new JsonSerializerOptions { WriteIndented = true }));
                     return (def, dir);
                 }
-                catch { /* cannot write here; try next */ }
+                catch { /* try next */ }
             }
 
-            // Final fallback: LocalApplicationData\Frostbite
+            // 3) Fallback to LocalAppData
             try
             {
                 var fallback = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "Frostbite");
                 Directory.CreateDirectory(fallback);
                 var path = Path.Combine(fallback, cfgFileName);
-                var json = JsonSerializer.Serialize(new { KeyboardNames = def.KeyboardNames }, new JsonSerializerOptions { WriteIndented = true });
-                File.WriteAllText(path, json);
+                var jsonObj = new
+                {
+                    KeyboardNames = def.KeyboardNames,
+                    CloneOnLock = def.CloneOnLock,
+                    CloneOnUnlockOnly = def.CloneOnUnlockOnly,
+                    PowerSaveOnLock = def.PowerSaveOnLock,
+                    PowerSaveDelayMs = def.PowerSaveDelayMs
+                };
+                File.WriteAllText(path, JsonSerializer.Serialize(jsonObj, new JsonSerializerOptions { WriteIndented = true }));
                 return (def, fallback);
             }
             catch (Exception ex)
             {
-                Log($"Failed to create config.json in any candidate location: {ex.Message}. Using defaults in-memory.");
-                return (def, Path.GetFullPath(".")); // return current directory as a best-effort configDir
+                Log($"Failed to create config.json: {ex.Message}. Using defaults in-memory.");
+                return (def, Path.GetFullPath("."));
             }
         }
 
-        // Try to parse config.json; supports { "KeyboardNames": [...] } or legacy { "KeyboardName": "..." }.
+        // Parse config.json (new schema preferred, fallback to legacy).
         private static UserConfig? TryReadConfigFile(string path)
         {
             try
             {
                 var text = File.ReadAllText(path);
+                try
+                {
+                    var cfg = JsonSerializer.Deserialize<UserConfig>(text, new JsonSerializerOptions { PropertyNameCaseInsensitive = true });
+                    if (cfg != null)
+                    {
+                        if (cfg.KeyboardNames == null || cfg.KeyboardNames.Count == 0) { cfg.KeyboardNames ??= new List<string> { "i4" }; }
+                        return cfg;
+                    }
+                }
+                catch { /* fall through to legacy parsing */ }
+
                 using var doc = JsonDocument.Parse(text);
                 var root = doc.RootElement;
                 var list = new List<string>();
@@ -297,13 +450,10 @@ namespace Frostbite
                 else if (root.TryGetProperty("KeyboardName", out var single) && single.ValueKind == JsonValueKind.String)
                 {
                     var s = single.GetString();
-                    if (!string.IsNullOrWhiteSpace(s))
-                    {
-                        list.Add(s);
-                    }
+                    if (!string.IsNullOrWhiteSpace(s)) { list.Add(s); }
                 }
 
-                return list.Count > 0 ? new UserConfig { KeyboardNames = list } : new UserConfig { KeyboardNames = new List<string> { "i4" } };
+                return new UserConfig { KeyboardNames = list.Count > 0 ? list : new List<string> { "i4" } };
             }
             catch (Exception ex)
             {
@@ -312,107 +462,9 @@ namespace Frostbite
             }
         }
 
-        // Find paired BLE *and* classic Bluetooth devices and check if any name contains a configured token and is connected.
-        // This expands detection to standard Bluetooth controllers (e.g. DualSense) as well as BLE keyboards.
-        private static async Task<bool> IsBluetoothPairedDeviceConnected(IEnumerable<string> tokens)
-        {
-            try
-            {
-                // 1) Check Bluetooth LE paired devices (existing behavior)
-                try
-                {
-                    var leSelector = BluetoothLEDevice.GetDeviceSelectorFromPairingState(true);
-                    var leDevices = await DeviceInformation.FindAllAsync(leSelector);
-                    foreach (var d in leDevices)
-                    {
-                        var name = d.Name ?? string.Empty;
-                        if (string.IsNullOrWhiteSpace(name))
-                        {
-                            continue;
-                        }
+        // Bluetooth detection (consolidated above).
 
-                        foreach (var t in tokens)
-                        {
-                            if (string.IsNullOrWhiteSpace(t))
-                            {
-                                continue;
-                            }
-
-                            if (!name.Contains(t, StringComparison.OrdinalIgnoreCase))
-                            {
-                                continue;
-                            }
-
-                            using var ble = await BluetoothLEDevice.FromIdAsync(d.Id);
-                            if (ble != null)
-                            {
-                                var status = ble.ConnectionStatus;
-                                Log($"MATCH (LE): Found device '{name}' matching token '{t}'. LIVE Connection Status: {status}");
-                                if (status == BluetoothConnectionStatus.Connected)
-                                {
-                                    return true;
-                                }
-                            }
-                        }
-                    }
-                }
-                catch (Exception ex)
-                {
-                    // Non-fatal: continue to classic Bluetooth check but log.
-                    Log($"BLE scan error: {ex.Message}");
-                }
-
-                // 2) Check classic Bluetooth (RFCOMM/paired) devices which include many controllers (e.g. DualSense).
-                //    Use BluetoothDevice APIs to enumerate paired devices and inspect live ConnectionStatus.
-                try
-                {
-                    // Use selector for paired Bluetooth devices (classic). BluetoothDevice provides selectors for paired devices.
-                    var classicSelector = BluetoothDevice.GetDeviceSelectorFromPairingState(true);
-                    var classicDevices = await DeviceInformation.FindAllAsync(classicSelector);
-                    foreach (var d in classicDevices)
-                    {
-                        var name = d.Name ?? string.Empty;
-                        if (string.IsNullOrWhiteSpace(name))
-                        {
-                            continue;
-                        }
-
-                        foreach (var t in tokens)
-                        {
-                            if (string.IsNullOrWhiteSpace(t))
-                            {
-                                continue;
-                            }
-
-                            if (!name.Contains(t, StringComparison.OrdinalIgnoreCase))
-                            {
-                                continue;
-                            }
-
-                            using var bt = await BluetoothDevice.FromIdAsync(d.Id);
-                            if (bt != null)
-                            {
-                                var status = bt.ConnectionStatus;
-                                Log($"MATCH (Classic): Found device '{name}' matching token '{t}'. LIVE Connection Status: {status}");
-                                if (status == BluetoothConnectionStatus.Connected)
-                                {
-                                    return true;
-                                }
-                            }
-                        }
-                    }
-                }
-                catch (Exception ex)
-                {
-                    // Non-fatal: log and return false if nothing else matched.
-                    Log($"Classic Bluetooth scan error: {ex.Message}");
-                }
-            }
-            catch (Exception ex) { Log($"Critical API Error: {ex.Message}"); }
-            return false;
-        }
-
-        // DTO helpers for JSON serialization of WINDOWPLACEMENT
+        // DTO helpers and read/write for window placements (unchanged).
         private sealed class WindowPlacementDto
         {
             public string Key { get; set; } = string.Empty;
@@ -432,26 +484,17 @@ namespace Frostbite
         private static Dictionary<string, WINDOWPLACEMENT> ReadSavedPlacementsJson(string path)
         {
             var result = new Dictionary<string, WINDOWPLACEMENT>();
-            if (!File.Exists(path))
-            {
-                return result;
-            }
+            if (!File.Exists(path)) { return result; }
 
             try
             {
                 var text = File.ReadAllText(path);
                 var arr = JsonSerializer.Deserialize<WindowPlacementDto[]?>(text);
-                if (arr == null)
-                {
-                    return result;
-                }
+                if (arr == null) { return result; }
 
                 foreach (var d in arr)
                 {
-                    if (d == null || string.IsNullOrWhiteSpace(d.Key) || d.Primary)
-                    {
-                        continue; // preserve previous Primary behavior
-                    }
+                    if (d == null || string.IsNullOrWhiteSpace(d.Key) || d.Primary) { continue; }
 
                     var wp = new WINDOWPLACEMENT
                     {

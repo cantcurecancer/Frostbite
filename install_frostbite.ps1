@@ -22,93 +22,99 @@ $timestamp = (Get-Date).ToString("s")
 
 Write-Host "--- Frostbite Installer ---" -ForegroundColor Cyan
 
-# 1. FIND THE PUBLISH FOLDER (Robust detection)
+# 1. FIND THE PUBLISH FOLDER (flattened)
 $relPaths = @('bin\Release\net8.0\publish', 'Frostbite\bin\Release\net8.0\publish', 'Wintermelon\bin\Release\net8.0\publish')
-$repoPublishDir = ""
-
-foreach ($rel in $relPaths) {
-    $testPath = Join-Path $scriptdir $rel
-    if (Test-Path $testPath) {
-        $repoPublishDir = $testPath
-        break
-    }
-}
+$repoPublishDir = $relPaths | ForEach-Object { $p = Join-Path $scriptdir $_; if (Test-Path $p) { $p; break } } | Select-Object -First 1
 
 if (-not $repoPublishDir) {
-    $foundExe = Get-ChildItem -Path $scriptdir -Filter "Frostbite.exe" -Recurse | Select-Object -First 1
-    if ($foundExe) { $repoPublishDir = $foundExe.DirectoryName }
+    $foundExe = Get-ChildItem -Path $scriptdir -Filter "Frostbite.exe" -Recurse -ErrorAction SilentlyContinue | Select-Object -First 1
+    $repoPublishDir = if ($foundExe) { $foundExe.DirectoryName } else { $null }
 }
 
-if (-not $repoPublishDir) {
-    throw "Could not find publish folder or Frostbite.exe. Please build the project first."
-}
+if (-not $repoPublishDir) { throw "Could not find publish folder or Frostbite.exe. Please build the project first." }
 
-# 2. PREPARE INSTALL DIR & COPY RUNTIME FILES
-if (-not (Test-Path $installDir)) {
-    New-Item -Path $installDir -ItemType Directory -Force | Out-Null
-}
+# Ensure install dir exists
+if (-not (Test-Path $installDir)) { New-Item -Path $installDir -ItemType Directory -Force | Out-Null }
 
 $copiedList = @()
-try {
-    $files = Get-ChildItem -Path $repoPublishDir -File -Recurse
+
+# 2. COPY RUNTIME FILES (guard then simple loop) - EXCLUDE config.json
+$files = Get-ChildItem -Path $repoPublishDir -File -Recurse -ErrorAction SilentlyContinue | Where-Object { $_.Name -ne 'config.json' }
+if ($files) {
     foreach ($file in $files) {
         $relative = $file.FullName.Substring($repoPublishDir.Length).TrimStart('\','/')
         $dest = Join-Path $installDir $relative
         $destDir = Split-Path -Parent $dest
         if (-not (Test-Path $destDir)) { New-Item -Path $destDir -ItemType Directory -Force | Out-Null }
-        
         Copy-Item -Path $file.FullName -Destination $dest -Force
         $copiedList += (Resolve-Path -LiteralPath $dest).Path
     }
     Write-Host "Copied $($files.Count) runtime files to ${installDir}." -ForegroundColor Green
 }
-catch {
-    Write-Warning "Failed to copy runtime files: $_"
+else {
+    Write-Warning "No runtime files found at $repoPublishDir"
 }
 
-# 3. COPY XML TEMPLATES
-$destXml1 = Join-Path $installDir (Split-Path $xml1 -Leaf)
-$destXml2 = Join-Path $installDir (Split-Path $xml2 -Leaf)
-
-foreach ($xml in @($xml1, $xml2)) {
-    if (Test-Path $xml) {
-        $d = Join-Path $installDir (Split-Path $xml -Leaf)
-        try { 
-            Copy-Item -Path $xml -Destination $d -Force
-            $copiedList += (Resolve-Path -LiteralPath $d).Path 
-        } catch { Write-Warning "Failed copying XML ${xml}: $_" }
+# 3. COPY XML TEMPLATES (single-level loop)
+@($xml1, $xml2) | ForEach-Object {
+    if (Test-Path $_) {
+        $dst = Join-Path $installDir (Split-Path $_ -Leaf)
+        try {
+            Copy-Item -Path $_ -Destination $dst -Force
+            $copiedList += (Resolve-Path -LiteralPath $dst).Path
+        } catch { Write-Warning "Failed copying XML ${_}: $_"}
     }
 }
 
-# 4. COPY UNINSTALLER AS UNWISE.ps1
-$uninstallSource = $null
-foreach ($candidate in $uninstallCandidates) {
-    $p = Join-Path $scriptdir $candidate
-    if (Test-Path $p) { $uninstallSource = $p; break }
-}
-
+# 4. COPY UNINSTALLER (straightforward)
+$uninstallSource = $uninstallCandidates | ForEach-Object { $p = Join-Path $scriptdir $_; if (Test-Path $p) { $p; break } } | Select-Object -First 1
 if ($uninstallSource) {
     try {
         $destUninstall = Join-Path $installDir $installedUninstallName
         Copy-Item -Path $uninstallSource -Destination $destUninstall -Force
         $copiedList += (Resolve-Path -LiteralPath $destUninstall).Path
         Write-Host "Installed uninstall helper as: ${destUninstall}" -ForegroundColor Green
-    }
-    catch {
-        Write-Warning "Failed to copy uninstall helper: $_"
-    }
+    } catch { Write-Warning "Failed to copy uninstall helper: $_" }
 }
 
-# 5. PERSIST MANIFEST
-try {
-    $copiedList | Sort-Object -Unique | Set-Content -Path $manifest -Force
-} catch { Write-Warning "Failed to write manifest: $_" }
+# 4.5 CREATE DEFAULT config.json (flat logic)
+$cfgPath = Join-Path $installDir 'config.json'
+$defaultCfg = @{
+    KeyboardNames = @('i4', 'DualSense', 'YourBluetoothDeviceHere')
+    CloneOnLock = $true
+    CloneOnUnlockOnly = $false
+    PowerSaveOnLock = $true
+    PowerSaveDelayMs = 500
+}
 
-# 6. TASK REGISTRATION
+if (-not (Test-Path $cfgPath)) {
+    try {
+        $json = $defaultCfg | ConvertTo-Json -Depth 5
+        Set-Content -Path $cfgPath -Value $json -Encoding UTF8
+        $copiedList += (Resolve-Path -LiteralPath $cfgPath).Path
+        Write-Host "Wrote default config.json to ${cfgPath}" -ForegroundColor Green
+    } catch { Write-Warning "Failed to write default config.json: $_" }
+} else {
+    Write-Host "config.json already exists at ${cfgPath}; not overwriting." -ForegroundColor Yellow
+}
+
+# 5. PERSIST MANIFEST (one-level guard)
+if ($copiedList -and $copiedList.Count -gt 0) {
+    try { $copiedList | Sort-Object -Unique | Set-Content -Path $manifest -Force } catch { Write-Warning "Failed to write manifest: $_" }
+}
+
+# 6. TASK REGISTRATION (early-exit inside function to avoid nesting)
 function Update-And-RegisterTask {
     param([string]$xmlFile, [string]$taskName, [string]$exeCommand, [string]$exeArgs = '')
+
+    if (-not (Test-Path $xmlFile)) { Write-Warning "Task XML not found: $xmlFile"; return }
     try {
         [xml]$schtask = Get-Content -Path $xmlFile -ErrorAction Stop
+    } catch { Write-Error "Failed to read task XML ${xmlFile}: $_"; return }
+
+    if (-not $schtask -or -not $schtask.Task) { Write-Warning "Invalid task XML: $xmlFile"; return }
+
+    try {
         $schtask.Task.RegistrationInfo.Date = $timestamp
         $schtask.Task.RegistrationInfo.Author = $user
 
@@ -124,14 +130,20 @@ function Update-And-RegisterTask {
         $schtask.Save($xmlFile)
         Register-ScheduledTask -Xml (Get-Content $xmlFile | Out-String) -TaskName $taskName -Force
         Write-Host "Registered Task: ${taskName}" -ForegroundColor Green
-    }
-    catch {
-        Write-Error "Failed to register task '${taskName}': $_"
-    }
+    } catch { Write-Error "Failed to register task '${taskName}': $_" }
 }
 
 $task1Name = 'Frostbite screen lock save window position clone display'
 $task2Name = 'Frostbite screen unlock extend display restore window'
+
+# --- MANUAL OVERRIDE START ---
+# We force the script to use the files in the current folder ($PSScriptRoot)
+
+$destXml1 = Join-Path $PSScriptRoot "Screen_lock_Save_window_position_Clone_display.xml"
+$destXml2 = Join-Path $PSScriptRoot "Screen_unlock_Extend_display_Restore_window.xml"
+
+Write-Host "Manual Override: Targeting XMLs in $PSScriptRoot" -ForegroundColor Green
+# --- MANUAL OVERRIDE END ---
 
 Update-And-RegisterTask -xmlFile $destXml1 -taskName $task1Name -exeCommand $preferredExe -exeArgs 'save'
 Update-And-RegisterTask -xmlFile $destXml2 -taskName $task2Name -exeCommand $preferredExe -exeArgs 'restore'

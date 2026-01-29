@@ -361,3 +361,10 @@ MigrationBackup/
 
 # Fody - auto-generated XML schema
 FodyWeavers.xsd
+
+# Custom Frostbite Project Ignores
+Program_Rii_i4_Version.cs
+wm.ico
+SettingsForm.cs
+SettingsForm.Designer.cs
+SettingsForm.resx
