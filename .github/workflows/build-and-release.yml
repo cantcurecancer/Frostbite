@@ -31,11 +31,16 @@ jobs:
     - name: Prepare release package
       run: |
         mkdir release_package
+        # Copy compiled binaries
         xcopy /E /I publish release_package\
-        copy install_frostbite.bat release_package\
-        copy UNWISE.bat release_package\
-        copy _install_frostbite.ps1 release_package\
-        copy _uninstall_frostbite.ps1 release_package\
+        
+        # Copy batch files
+        copy *.bat release_package\
+        
+        # Copy ALL powershell scripts (the wildcard * handles zz_ or _)
+        copy *.ps1 release_package\
+        
+        # Copy remaining assets
         copy *.xml release_package\
         copy LICENSE release_package\
         copy wm.ico release_package\
