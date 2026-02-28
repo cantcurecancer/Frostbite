@@ -16,6 +16,14 @@ $assets = @(
     "LICENSE", 
     "wm.ico"
 )
+foreach ($file in $assets) {
+    if (Test-Path $file) {
+        Copy-Item $file -Destination $tempDir
+        Write-Host "Copied $file" -ForegroundColor DarkGray
+    } else {
+        Write-Warning "Could not find $file!"
+    }
+}
 
 # 2. GATHER XMLs
 Get-ChildItem -Filter "*.xml" | Copy-Item -Destination $tempDir
