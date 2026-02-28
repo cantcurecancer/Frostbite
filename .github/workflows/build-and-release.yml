@@ -25,7 +25,7 @@ jobs:
       run: dotnet build --configuration Release --no-restore
     
     - name: Publish
-      run: dotnet publish Frostbite.csproj -c Release -f net8.0 -r win-x64 -o ./publish --no-build --self-contained true
+      run: dotnet publish Frostbite.csproj -c Release -f net8.0 -r win-x64 -o ./publish --self-contained true --force
     
     # FIX 2: Correcting file names based on your Solution Explorer
     - name: Prepare release package
