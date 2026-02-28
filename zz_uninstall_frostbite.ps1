@@ -115,7 +115,7 @@ if ($RemoveTemplates) {
 }
 
 # 4. ATTEMPT IMMEDIATE REMOVAL OF COMMON FILES (best-effort)
-$extraFiles = @('_UNWISE.ps1', 'UNWISE.bat', '_install_frostbite.ps1', 'install_frostbite.bat', 'debug_log.txt', 'winpos.json', 'install_manifest.txt', 'Frostbite.exe', 'config.json')
+$extraFiles = @('zz_uninstall_frostbite.ps1', 'UNWISE.bat', 'zz_install_frostbite.ps1', 'install_frostbite.bat', 'debug_log.txt', 'winpos.json', 'install_manifest.txt', 'Frostbite.exe', 'config.json')
 foreach ($f in $extraFiles) {
     $p = Join-Path $installDir $f
     if (Test-Path $p) {
@@ -141,9 +141,9 @@ try {
 Start-Sleep -Seconds 6
 # Best-effort remove known files and attempt folder removal when empty
 \$paths = @(
-    '$installDir\_UNWISE.ps1',
+    '$installDir\zz_uninstall_frostbite.ps1',
     '$installDir\UNWISE.bat',
-    '$installDir\_install_frostbite.ps1',
+    '$installDir\zz_install_frostbite.ps1',
     '$installDir\install_frostbite.bat',
     '$installDir\debug_log.txt',
     '$installDir\winpos.json',
@@ -228,3 +228,7 @@ try {
     }
 }
 catch { }
+
+# Optional: remove old files if git mv wasn't used
+rm _install_frostbite.ps1 -ErrorAction SilentlyContinue
+rm _uninstall_frostbite.ps1 -ErrorAction SilentlyContinue

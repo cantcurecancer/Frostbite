@@ -3,7 +3,7 @@ name: Build and Release
 on:
   push:
     tags:
-      - 'v*'  # Trigger on version tags like v0.2.1, v0.3.0, etc.
+      - 'v*'
 
 jobs:
   build:
@@ -12,6 +12,7 @@ jobs:
     steps:
     - uses: actions/checkout@v4
     
+    # FIX 1: Explicitly use .NET 8 to avoid the SDK 10 error
     - name: Setup .NET 8
       uses: actions/setup-dotnet@v4
       with:
@@ -24,44 +25,36 @@ jobs:
       run: dotnet build --configuration Release --no-restore
     
     - name: Publish
-      run: dotnet publish Frostbite.csproj -c Release -f net8.0 -r win-x64 -o ./publish --no-build --self-contained false
+      run: dotnet publish Frostbite.csproj -c Release -f net8.0 -r win-x64 -o ./publish --no-build --self-contained true
     
+    # FIX 2: Correcting file names based on your Solution Explorer
     - name: Prepare release package
       run: |
-        # Create a folder with all necessary files
         mkdir release_package
-        xcopy /E /I publish release_package\Frostbite
+        xcopy /E /I publish release_package\
         copy install_frostbite.bat release_package\
         copy UNWISE.bat release_package\
         copy _install_frostbite.ps1 release_package\
-        copy _UNWISE.ps1 release_package\
-        copy Screen_lock_Save_window_position_Clone_display.xml release_package\
-        copy Screen_unlock_Extend_display_Restore_window.xml release_package\
-        copy Screen_login_Clone_display.xml release_package\
-        copy Screen_restart_Clone_display.xml release_package\
+        copy _uninstall_frostbite.ps1 release_package\
+        copy *.xml release_package\
+        copy LICENSE release_package\
+        copy wm.ico release_package\
         copy README.md release_package\
     
     - name: Zip release package
       run: |
-        powershell -Command "Compress-Archive -Path release_package -DestinationPath Frostbite-${{ github.ref_name }}.zip"
+        powershell -Command "Compress-Archive -Path release_package\* -DestinationPath Frostbite-${{ github.ref_name }}.zip"
     
+    # FIX 3: Added ID 'create_release' so the next step can find the upload URL
     - name: Create GitHub Release
+      id: create_release
       uses: actions/create-release@v1
       env:
         GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
       with:
         tag_name: ${{ github.ref_name }}
         release_name: Frostbite ${{ github.ref_name }}
-        body: |
-          Frostbite release ${{ github.ref_name }}
-          
-          ## Installation
-          1. Download `Frostbite-${{ github.ref_name }}.zip` below
-          2. Extract to a folder
-          3. Double-click `install_frostbite.bat` (will request admin privileges)
-          4. Edit `C:\Frostbite\config.json` to add your Bluetooth device names
-          
-          See README.md for more details.
+        body_path: notes.md
         draft: false
         prerelease: false
     

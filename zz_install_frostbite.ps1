@@ -1,7 +1,7 @@
 #Requires -RunAsAdministrator
 <#
 .SYNOPSIS
-  Register Frostbite scheduled tasks for lock/unlock events and install UNWISE.ps1.
+  Register Frostbite scheduled tasks for lock/unlock events and install uninstall helper.
 #>
 
 # --- configuration ---------------------------------------------------------
@@ -13,9 +13,9 @@ $installDir = 'C:\Frostbite'
 $preferredExe = Join-Path $installDir 'Frostbite.exe'
 $manifest = Join-Path $installDir 'install_manifest.txt'
 
-# Uninstall helper settings
-$uninstallCandidates = @('_uninstall_frostbite.ps1', 'UNWISE.ps1', 'uninstall_frostbite.ps1')
-$installedUninstallName = '_uninstall_frostbite.ps1'
+# Uninstall helper candidates (try zz name first)
+$uninstallCandidates = @('zz_uninstall_frostbite.ps1', 'UNWISE.ps1', 'uninstall_frostbite.ps1')
+$installedUninstallName = 'zz_uninstall_frostbite.ps1'
 
 $user = "$env:USERDOMAIN\$env:USERNAME"
 $timestamp = (Get-Date).ToString("s")
@@ -78,7 +78,7 @@ if ($uninstallSource) {
 }
 
 # 4.1 COPY BATCH WRAPPERS (for user-friendly admin elevation)
-@('_install_frostbite.ps1', 'install_frostbite.bat', 'UNWISE.bat') | ForEach-Object {
+@('zz_install_frostbite.ps1', 'install_frostbite.bat', 'UNWISE.bat') | ForEach-Object {
     $batchSource = Join-Path $scriptdir $_
     if (Test-Path $batchSource) {
         try {
@@ -91,7 +91,7 @@ if ($uninstallSource) {
 }
 
 # 4.2 HIDE INTERNAL SCRIPTS
-$filesToHide = @('_uninstall_frostbite.ps1', '_install_frostbite.ps1')
+$filesToHide = @('zz_uninstall_frostbite.ps1', 'zz_install_frostbite.ps1')
 foreach ($f in $filesToHide) {
     $target = Join-Path $installDir $f
     if (Test-Path $target) {
@@ -181,9 +181,7 @@ Update-And-RegisterTask -xmlFile $destXml2 -taskName $task2Name -exeCommand $pre
 
 # --- Additional task registrations for login and restart ---
 $task3Name = 'Frostbite screen login clone display'
-
 $destXml3 = Join-Path $PSScriptRoot "Screen_login_Clone_display.xml"
-
 Update-And-RegisterTask -xmlFile $destXml3 -taskName $task3Name -exeCommand $preferredExe -exeArgs 'save'
 
 Write-Host "`nInstallation Complete." -ForegroundColor Cyan
