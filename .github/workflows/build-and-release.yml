@@ -1,0 +1,76 @@
+name: Build and Release
+
+on:
+  push:
+    tags:
+      - 'v*'  # Trigger on version tags like v0.2.1, v0.3.0, etc.
+
+jobs:
+  build:
+    runs-on: windows-latest
+    
+    steps:
+    - uses: actions/checkout@v4
+    
+    - name: Setup .NET 8
+      uses: actions/setup-dotnet@v4
+      with:
+        dotnet-version: '8.0.x'
+    
+    - name: Restore dependencies
+      run: dotnet restore
+    
+    - name: Build
+      run: dotnet build --configuration Release --no-restore
+    
+    - name: Publish
+      run: dotnet publish Frostbite.csproj -c Release -f net8.0 -r win-x64 -o ./publish --no-build --self-contained false
+    
+    - name: Prepare release package
+      run: |
+        # Create a folder with all necessary files
+        mkdir release_package
+        xcopy /E /I publish release_package\Frostbite
+        copy install_frostbite.bat release_package\
+        copy UNWISE.bat release_package\
+        copy _install_frostbite.ps1 release_package\
+        copy _UNWISE.ps1 release_package\
+        copy Screen_lock_Save_window_position_Clone_display.xml release_package\
+        copy Screen_unlock_Extend_display_Restore_window.xml release_package\
+        copy Screen_login_Clone_display.xml release_package\
+        copy Screen_restart_Clone_display.xml release_package\
+        copy README.md release_package\
+    
+    - name: Zip release package
+      run: |
+        powershell -Command "Compress-Archive -Path release_package -DestinationPath Frostbite-${{ github.ref_name }}.zip"
+    
+    - name: Create GitHub Release
+      uses: actions/create-release@v1
+      env:
+        GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      with:
+        tag_name: ${{ github.ref_name }}
+        release_name: Frostbite ${{ github.ref_name }}
+        body: |
+          Frostbite release ${{ github.ref_name }}
+          
+          ## Installation
+          1. Download `Frostbite-${{ github.ref_name }}.zip` below
+          2. Extract to a folder
+          3. Double-click `install_frostbite.bat` (will request admin privileges)
+          4. Edit `C:\Frostbite\config.json` to add your Bluetooth device names
+          
+          See README.md for more details.
+        draft: false
+        prerelease: false
+    
+    - name: Upload Release Asset
+      uses: actions/upload-release-asset@v1
+      env:
+        GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      with:
+        upload_url: ${{ steps.create_release.outputs.upload_url }}
+        asset_path: ./Frostbite-${{ github.ref_name }}.zip
+        asset_name: Frostbite-${{ github.ref_name }}.zip
+        asset_content_type: application/zip

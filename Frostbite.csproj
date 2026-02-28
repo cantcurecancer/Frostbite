@@ -16,7 +16,12 @@
   </ItemGroup>
 
   <ItemGroup>
+    <None Remove="build_release.ps1" />
     <None Remove="Wintermelon_demo.jpg" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <None Include=".github\workflows\build-and-release.yml" />
   </ItemGroup>
 
   <!-- Removed stray placeholder reference to YourProject.csproj that caused Solution Explorer errors.

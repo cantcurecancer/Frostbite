@@ -1,61 +1,59 @@
 # Frostbite
-
 Frostbite is a small C# utility that makes the lockscreen appear on all displays by temporarily switching the display projection mode to Duplicate on lock, then restoring your original topology on unlock. It targets Windows 11, .NET 8 and C# 12.
 
-Why use it
+## Why use it
 - Windows 11 shows the lockscreen only on the primary display. Frostbite mirrors the lockscreen to other displays so your TV or second monitor shows the lockscreen too.
 - On unlock Frostbite restores your previous display topology and window positions automatically.
 - Detects Bluetooth devices (BLE and classic) so you can use a couch keyboard or controller to decide whether to switch back to an external display.
 
-How it works (summary)
-1. On lock: records top-level window placements, switches projection mode to Duplicate.
-2. On unlock: polls paired Bluetooth devices for configured name tokens (supports BLE and classic controllers), chooses internal or external topology, waits for the topology to settle, then restores saved window positions.
-
-Requirements
+## Requirements
 - Windows 11 (tested target)
-- .NET 8 SDK / runtime
-- C# 12 (project set to use C# 12)
-- Recommended IDE: Visual Studio 2026 (with .NET 8 workload)
+- .NET 8 runtime (included in self-contained releases)
 
-Quick start (build & publish)
-1. Open the solution `Frostbite.sln` in Visual Studio 2026. Main code: `Program.cs`.  
-2. Build: use __Build > Build Solution__.  
-3. Publish: use __Build > Publish Frostbite__ with recommended settings:
-   - Target framework: `net8.0`  
-   - Configuration: `Release`  
-   - Target runtime: `win-x64`  
-   - Deployment mode: Framework-dependent (or Self-contained for a standalone binary)  
-   - Target location: `bin\Release\net8.0\publish\`  
-   - Optional: enable `Produce single file` or tweak trimming/ReadyToRun as needed.  
-4. The published binary will be `bin\Release\net8.0\publish\Frostbite.exe`.
+## Install
+**Users should double-click one of these files:**
 
-Configuration & files
-- Saved window placements: `C:\Frostbite\winpos.json`  
-- Config file (created on first run if missing): `config.json` in the app folder (or local app data `...\Frostbite`). It contains the list of device name tokens Frostbite will search for.  
-- Logs (best-effort): `C:\Frostbite\debug_log.txt`
+- `install_frostbite.bat` — Install Frostbite
+- Edit `C:\Frostbite\config.json` to add your Bluetooth device names
 
-Scheduled tasks (recommended)
-Frostbite is intended to run via two scheduled tasks:
-- `Frostbite screen lock save window position clone display` — runs `Frostbite.exe save` on lock.  
-- `Frostbite screen unlock extend display restore window` — runs `Frostbite.exe restore` on unlock.
+## Uninstall
+- Double-click `UNWISE.bat` from `C:\Frostbite` to uninstall and remove files.
 
-Install:
-1. Open PowerShell as Administrator
-2. Navigate to the folder containing the scripts (e.g. `cd C:\Users\YourName\Downloads\Frostbite`)
-3. Install using `.\install_frostbite.ps1` to create the scheduled tasks and copy files to `C:\Frostbite`
-4. Update config.json in `C:\Frostbite` to add your Bluetooth device name found in Settings > Bluetooth & devices. Example entry:
-	- `{ "KeyboardNames": [ "i4", "DualSense", "yourBluetoothDeviceName" ] }`
+**Internal files (do not double-click):**
+- `_install_frostbite.ps1` — Internal installer script
+- `_UNWISE.ps1` — Internal uninstaller script
 
-Uninstall:
-1. Open PowerShell as Administrator
-2. Navigate to install folder (`cd C:\Frostbite`)
-3. Uninstall using `.\UNWISE.ps1` to delete the scheduled tasks and remove installed files from `C:\Frostbite`
+## Development (building from source)
+If you're a developer and want to build from source:
 
-Usage notes & troubleshooting
-- The app polls paired Bluetooth devices briefly on unlock; if your controller/keyboard is slow to reconnect, increase the polling window in code.  
-- Bluetooth detection uses `Windows.Devices.*` APIs — make sure your runtime supports these APIs.  
-- If you rename the executable or solution, update the scheduled tasks and script names accordingly.  
-- Logs are best-effort and may not always be written (permission/environment dependent).
+1. Clone the repo and open `Frostbite.sln` in Visual Studio 2026
+2. Ensure you have .NET 8 SDK installed
+3. Build: __Build > Build Solution__
+4. Publish: __Build > Publish Frostbite__ with these settings:
+   - Target framework: `net8.0`
+   - Configuration: `Release`
+   - Target runtime: `win-x64`
+   - Deployment mode: Framework-dependent
+   - Target location: `bin\Release\net8.0\publish\`
+5. Run the installer from your source folder as usual
 
-Attribution
-- This project was adapted from earlier work (originally named Wintermelon). See repository history for details.
+## Configuration & files
+- Saved window placements: `C:\Frostbite\winpos.json`
+- Config file: `C:\Frostbite\config.json` (created on first run if missing)
+- Logs: `C:\Frostbite\debug_log.txt` (best-effort)
+
+## Scheduled tasks
+Frostbite runs automatically via Windows Scheduled Tasks:
+- `Frostbite screen lock save window position clone display` — runs on lock
+- `Frostbite screen unlock extend display restore window` — runs on unlock
+- `Frostbite screen login clone display` — runs on login
+- `Frostbite screen restart clone display` — runs on restart/startup
+
+## Usage notes & troubleshooting
+- The app polls paired Bluetooth devices briefly on unlock; if your controller/keyboard is slow to reconnect, increase delays in config.json
+- Bluetooth detection uses Windows.Devices.* APIs
+- Logs are best-effort; check `debug_log.txt` if something isn't working
+- To find your device name: Settings > Bluetooth & devices > Paired devices (copy the exact name)
+
+## Attribution
+- Adapted from earlier work (Wintermelon). See repository history for details.
