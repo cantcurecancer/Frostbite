@@ -12,7 +12,7 @@ jobs:
     steps:
     - uses: actions/checkout@v4
     
-    # FIX 1: Explicitly use .NET 8 to avoid the SDK 10 error
+    # FIX 1: Pins SDK to .NET 8 to prevent the NETSDK1005 error
     - name: Setup .NET 8
       uses: actions/setup-dotnet@v4
       with:
@@ -27,30 +27,29 @@ jobs:
     - name: Publish
       run: dotnet publish Frostbite.csproj -c Release -f net8.0 -r win-x64 -o ./publish --self-contained true --force
     
-    # FIX 2: Correcting file names based on your Solution Explorer
+    # FIX 2: Correcting file names and ensuring PS1 files are included
     - name: Prepare release package
       run: |
         mkdir release_package
-        # Copy compiled binaries
+        # 1. Copy the compiled app files
         xcopy /E /I publish release_package\
         
-        # Copy batch files
+        # 2. Copy scripts using wildcards (catches zz_ and batch files)
         copy *.bat release_package\
-        
-        # Copy ALL powershell scripts (the wildcard * handles zz_ or _)
         copy *.ps1 release_package\
         
-        # Copy remaining assets
+        # 3. Copy assets, license, and icon
         copy *.xml release_package\
         copy LICENSE release_package\
         copy wm.ico release_package\
         copy README.md release_package\
-    
+
     - name: Zip release package
       run: |
-        powershell -Command "Compress-Archive -Path release_package\* -DestinationPath Frostbite-${{ github.ref_name }}.zip"
+        # Zips only the contents of the package folder for a clean internal structure
+        powershell -Command "Compress-Archive -Path release_package\* -DestinationPath Frostbite-${{ github.ref_name }}.zip -Force"
     
-    # FIX 3: Added ID 'create_release' so the next step can find the upload URL
+    # FIX 3: Uses ID for upload step to reference
     - name: Create GitHub Release
       id: create_release
       uses: actions/create-release@v1
