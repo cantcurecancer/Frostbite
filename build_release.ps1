@@ -8,10 +8,14 @@ if (Test-Path $tempDir) { Remove-Item $tempDir -Recurse -Force }
 New-Item -ItemType Directory -Path $tempDir | Out-Null
 
 # 1. GATHER SCRIPTS & ASSETS
-$assets = @("install_frostbite.bat", "_install_frostbite.ps1", "UNWISE.bat", "_uninstall_frostbite.ps1", "LICENSE", "wm.ico")
-foreach ($f in $assets) {
-    if (Test-Path $f) { Copy-Item $f -Destination $tempDir }
-}
+$assets = @(
+    "install_frostbite.bat", 
+    "UNWISE.bat", 
+    "zz_install_frostbite.ps1", 
+    "zz_uninstall_frostbite.ps1", 
+    "LICENSE", 
+    "wm.ico"
+)
 
 # 2. GATHER XMLs
 Get-ChildItem -Filter "*.xml" | Copy-Item -Destination $tempDir

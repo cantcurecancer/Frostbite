@@ -1,3 +1,6 @@
+[![GitHub Release](https://img.shields.io/github/v/release/cantcurecancer/Frostbite?include_prereleases&style=flat-square)](https://github.com/cantcurecancer/Frostbite/releases/latest)
+[![License](https://img.shields.io/github/license/cantcurecancer/Frostbite?style=flat-square)](https://github.com/cantcurecancer/Frostbite/blob/main/LICENSE)
+[![Repo Size](https://img.shields.io/github/repo-size/cantcurecancer/Frostbite?style=flat-square)](https://github.com/cantcurecancer/Frostbite)
 # Frostbite
 Frostbite is a small C# utility that makes the lockscreen appear on all displays by temporarily switching the display projection mode to Duplicate on lock, then restoring your original topology on unlock. It targets Windows 11, .NET 8 and C# 12.
 

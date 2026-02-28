@@ -6,7 +6,7 @@ REM Check if running as admin
 net session >nul 2>&1
 if %errorLevel% == 0 (
     REM Already running as admin; launch the PowerShell script
-    powershell.exe -NoProfile -ExecutionPolicy Bypass -File "%~dp0_install_frostbite.ps1"
+    powershell.exe -NoProfile -ExecutionPolicy Bypass -File "%~dp0zz_install_frostbite.ps1"
     
     REM Pause the window so the user can review, then naturally exit
     echo.

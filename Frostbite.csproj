@@ -24,6 +24,21 @@
     <None Include=".github\workflows\build-and-release.yml" />
   </ItemGroup>
 
+  <ItemGroup>
+    <None Update="install_frostbite.bat">
+      <CopyToOutputDirectory>Always</CopyToOutputDirectory>
+    </None>
+    <None Update="UNWISE.bat">
+      <CopyToOutputDirectory>Always</CopyToOutputDirectory>
+    </None>
+    <None Update="_install_frostbite.ps1">
+      <CopyToOutputDirectory>Always</CopyToOutputDirectory>
+    </None>
+    <None Update="_uninstall_frostbite.ps1">
+      <CopyToOutputDirectory>Always</CopyToOutputDirectory>
+    </None>
+  </ItemGroup>
+
   <!-- Removed stray placeholder reference to YourProject.csproj that caused Solution Explorer errors.
        If you intended to include another project file, replace this with the correct path. -->
   <!--<ItemGroup>
